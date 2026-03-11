@@ -161,7 +161,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
 def render_3d(cdm_data, orbit1=None, orbit2=None, output_filename: str = "conjunction_3d.html"):
     _ = orbit1, orbit2
-    pc_shiro = float(cdm_data["pc"]) / 25.0
+    pc_shiro = float(cdm_data.get("pc_shiro", float(cdm_data["pc"]) / 25.0))
     shiro_decision = "PASS" if pc_shiro < 1e-4 else "ACT"
     shiro_decision_class = "green" if shiro_decision == "PASS" else "red"
     shiro_pc_class = "green" if pc_shiro < 1e-4 else "red"

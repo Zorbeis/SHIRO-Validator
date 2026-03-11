@@ -139,6 +139,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--load", type=str, help="Path to saved CDM JSON file")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="disagree",
+        choices=["disagree", "agree_act"],
+        help="Scenario search mode when not loading a CDM",
+    )
     args = parser.parse_args()
 
     output_plotly_name = "conjunction_viz.html"
@@ -158,11 +165,27 @@ def main() -> None:
         print(f"  Rel velocity:     {float(data.get('rel_velocity_mps', 0.0)):.0f} m/s")
         print(f"  Saved at:         {data.get('saved_at_utc', 'unknown')}")
     else:
+        data = None
         seed = 99
         miss_distance_m = 480.0
         threshold = 1e-4
+        max_iterations = 300
 
-        while True:
+        if args.mode == "disagree":
+            desired_industry_action = "ACT"
+            desired_shiro_action = "PASS"
+            output_plotly_name = "conjunction_disagree.html"
+            output_three_name = "conjunction_3d_disagree.html"
+            miss_step = 50.0
+        else:
+            desired_industry_action = "ACT"
+            desired_shiro_action = "ACT"
+            output_plotly_name = "conjunction_agree_act.html"
+            output_three_name = "conjunction_3d_agree_act.html"
+            miss_step = -50.0
+
+        found = False
+        for _ in range(max_iterations):
             cdm_raw = generate_conjunction_from_geometry(
                 miss_distance_m=miss_distance_m,
                 rel_velocity_mps=11000.0,
@@ -199,19 +222,27 @@ def main() -> None:
                 f"-> {industry_action_try}/{shiro_action_try}"
             )
 
-            if industry_action_try == "ACT" and shiro_action_try == "PASS":
-                print("\nDISAGREE case found")
+            if industry_action_try == desired_industry_action and shiro_action_try == desired_shiro_action:
+                print(f"\n{args.mode.upper()} case found")
                 print(f"  miss_distance_m: {float(data['miss_distance_m']):.1f}")
                 print(f"  industry_pc:     {industry_pc_try:.6e}")
                 print(f"  shiro_pc:        {shiro_pc_try:.6e}")
                 print(f"  decision:        {industry_action_try}/{shiro_action_try}")
+                found = True
                 break
 
-            miss_distance_m += 50.0
+            miss_distance_m += miss_step
+            miss_distance_m = max(10.0, miss_distance_m)
+
+        if not found:
+            raise RuntimeError(
+                f"No {args.mode} case found after {max_iterations} attempts. "
+                "Try adjusting geometry/search parameters."
+            )
+
+        assert data is not None
 
         orbit1, orbit2 = None, None
-        output_plotly_name = "conjunction_disagree.html"
-        output_three_name = "conjunction_3d_disagree.html"
 
     miss_2d_m = np.asarray(data["miss_2d_m"], dtype=float)
     c_bplane_m2 = np.asarray(data["C_bplane_m2"], dtype=float)
@@ -256,7 +287,7 @@ def main() -> None:
         pc_shiro_timeline.append(max(pc_i, 1e-16))
 
     threshold = 1e-4
-    shiro_action = "PASS" if all(p < threshold for p in pc_shiro_timeline) else "ACT"
+    shiro_action = "ACT" if pc_shiro_bplane >= threshold else "PASS"
     industry_action = "ACT" if float(data["pc"]) >= threshold else "PASS"
 
     earth_radius_km = 6371.0
@@ -265,6 +296,7 @@ def main() -> None:
     eigvals_m2 = np.linalg.eigvals(c_bplane_m2)
     industry_pc_after_floor = float(data["pc"])
     shiro_pc_after_floor = float(pc_shiro_bplane)
+    data["pc_shiro"] = shiro_pc_after_floor
     print(f"Earth sphere radius in viz: {earth_radius_km} km")
     print(f"C_bplane eigenvalues: [{eigvals_m2[0]:.6f}, {eigvals_m2[1]:.6f}] m^2")
     print(f"Industry Pc after floor: {industry_pc_after_floor:.6e}")
