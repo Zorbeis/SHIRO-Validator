@@ -14,3 +14,4 @@ outputs/batch_results_*.json
 web/node_modules/
 .cache/
 .cache_expanded/
+src/shiro/validator/spacetrack_data_extraction.py
