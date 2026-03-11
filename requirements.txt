@@ -1,0 +1,5 @@
+numpy>=1.24
+scipy>=1.10
+astropy>=5.3
+poliastro>=0.17
+plotly>=5.15

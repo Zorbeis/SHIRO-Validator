@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv
+venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+outputs/cdm_events/
+outputs/batch_results_*.json
+*.log
+web/node_modules/
+.cache/
+.cache_expanded/

@@ -1,0 +1,26 @@
+{
+  "dataset": "shiro_validator_filtered_acted_maneuverable.json",
+  "total_relevant_events": 0,
+  "filter": {
+    "sat1_type": "PAYLOAD",
+    "industry_acted": true,
+    "sat1_name_contains_any": [
+      "STARLINK",
+      "ONEWEB",
+      "PLANET",
+      "FLOCK",
+      "LEMUR",
+      "IRIDIUM",
+      "ORBCOMM",
+      "SPIRE",
+      "ISS",
+      "GPS",
+      "GOES",
+      "TERRA",
+      "AQUA"
+    ]
+  },
+  "source_records_total": 275,
+  "source_unique_cdm_records": 200,
+  "generated_at": "2026-03-06T00:00:00+00:00"
+}

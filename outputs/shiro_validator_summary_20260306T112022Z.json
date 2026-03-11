@@ -1,0 +1,11 @@
+{
+  "total_events": 0,
+  "industry_acted": 0,
+  "unnecessary_maneuvers": 0,
+  "unnecessary_maneuver_rate": 0.0,
+  "agree_act": 0,
+  "shiro_more_cautious": 0,
+  "unknown": 0,
+  "policy_version": "v0.1.0",
+  "run_at": "2026-03-06T11:20:22.934706+00:00"
+}
