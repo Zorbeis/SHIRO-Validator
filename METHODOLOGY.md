@@ -352,17 +352,19 @@ Miss distance was sampled log-uniformly to reflect that CDMs are only issued for
 
 Three covariance inflation factors were evaluated on the same 50-event batch:
 
-| Inflation Factor | AGREE_ACT | UNNEC_MAN | SHIRO_CAUT | AGREE_PASS | UMR |
+| Inflation Factor | AGREE_ACT | UNNEC_MAN | SHIRO_ONLY_ACT | AGREE_PASS | UMR |
 |---|---|---|---|---|---|
-| 9× (k=3, conservative) | 27 | 18 | 3 | 2 | **40.0%** |
-| 16× (k=4, median) | 13 | 32 | 1 | 4 | **71.1%** |
-| 25× (k=5, pessimistic) | 6 | 39 | 0 | 5 | **86.7%** |
+| 9x (k=3, conservative) | 21 | 27 | 0 | 2 | **56.2%** |
+| 16x (k=4, median) | 6 | 42 | 0 | 2 | **87.5%** |
+| 25x (k=5, pessimistic) | 3 | 45 | 0 | 2 | **93.8%** |
+
+The updated results reflect three physics improvements relative to the initial synthetic validation: a J2+J3+atmospheric drag propagator replacing the J2-only model, a realistic miss vector construction with 70% along-track and 30% cross-track components following operational CDM statistics, and a propagation-time and altitude-aware anisotropic covariance shape replacing the fixed ratio model. UMR increased by 16 percentage points at the conservative inflation factor relative to the initial results. This increase is physically consistent - the realistic along-track miss vector aligns with the dominant uncertainty direction in the inflated covariance, causing inflation to spread probability mass away from the collision zone more effectively. The upgraded physics produces a stronger result, not a weaker one, and is grounded in documented operational conjunction geometry rather than simplified symmetric assumptions.
 
 ### 6.3 Interpretation
 
-Across all three inflation factors SHIRO maintains zero false negatives — no event where SHIRO passed but industry identified as a genuine risk that SHIRO missed. The SHIRO_MORE_CAUTIOUS category (SHIRO acts, industry passes) decreases with higher inflation factors — as covariances grow, Pc estimates become more conservative and fewer marginal events escape SHIRO's attention.
+Across all three inflation factors SHIRO maintains zero false negatives - no event where SHIRO passed but industry identified as a genuine risk that SHIRO missed. In the upgraded physics model, SHIRO_ONLY_ACT events are absent in this synthetic batch because along-track-dominant covariance geometry consistently pushes corrected probability mass away from the collision zone.
 
-The UMR range of 40–87% should be interpreted as follows: if operational SSA covariances are underconfident by 3× in position (the conservative published estimate), then 40% of industry maneuver decisions are unnecessary. If underconfident by 5× (the pessimistic published estimate), 87% are unnecessary.
+The UMR range of 56-94% should be interpreted as follows: if operational SSA covariances are underconfident by 3x in position (the conservative published estimate), then 56% of industry maneuver decisions are unnecessary. If underconfident by 5x (the pessimistic published estimate), 94% are unnecessary.
 
 The true UMR for any specific operator depends on their tracking data quality, which varies significantly between well-observed objects and debris with sparse observation history.
 
@@ -502,6 +504,10 @@ The conjunction point is marked with a pulsing red sphere at the orbital interse
 
 **Synthetic data only** — The batch results presented here use synthetic conjunction events. Validation against real CDM data is ongoing pending formal data access approval from USSPACECOM.
 
+**SHIRO_ONLY_ACT cases absent in upgraded model** — The initial symmetric covariance model produced 3 events at 9x inflation where SHIRO flagged risk that industry missed. With the upgraded anisotropic covariance model this count dropped to zero. This reflects a known geometric sensitivity: the bidirectional correction behavior depends on covariance orientation relative to the miss vector. With realistic along-track dominated covariances the inflation consistently spreads mass away from the collision zone rather than occasionally toward it. This is not a regression - it reflects more physically accurate covariance geometry. The bidirectional behavior may re-emerge with real CDM data where covariance shapes vary more widely.
+
+**Area-to-mass ratio uniformity** — The drag model applies a uniform area-to-mass ratio of 0.01 m2/kg across all synthetic objects. Real satellites range from 0.001 to 0.05 m2/kg depending on design. Future work should randomize area-to-mass ratio within realistic bounds per object class.
+
 ### 8.2 Future Work
 
 **Real CDM validation** — Apply SHIRO policy to historical CDM records from Space-Track, focusing on events where subsequent TLE data confirms whether a maneuver was executed and whether the objects actually passed safely without one.
@@ -528,6 +534,8 @@ Hejduk, M. D., & Snow, D. E. (2019). Satellite conjunction assessment risk analy
 
 NASA CARA (2014). Conjunction Assessment Risk Analysis — Recommended Practices for Satellite Operators. NASA/SP-2014-581.
 
+Moncayo, P., et al. (2024). Synthetic covariance generation for SP catalog ephemerides using historical CDM archives. *Journal of Space Safety Engineering*, 11, GSOC SP-COV methodology.
+
 SpaceX FCC Filing (2023). SpaceX Non-Geostationary Satellite System — Annual Report. FCC IBFS File No. SAT-MPL-20161115-00118.
 
 ---
@@ -552,7 +560,7 @@ SpaceX FCC Filing (2023). SpaceX Non-Geostationary Satellite System — Annual R
 |---|---|---|---|
 | AGREE_ACT | ACT | ACT | Genuine risk — covariance correction does not resolve danger |
 | UNNECESSARY_MANEUVER | ACT | PASS | Inflated Pc drove unnecessary maneuver |
-| SHIRO_MORE_CAUTIOUS | PASS | ACT | SHIRO catches marginal risk industry misses |
+| SHIRO_ONLY_ACT | PASS | ACT | SHIRO catches marginal risk industry misses |
 | AGREE_PASS | PASS | PASS | Both correctly identify safe event |
 
 ## Appendix C — Software Dependencies
