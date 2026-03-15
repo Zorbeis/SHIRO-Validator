@@ -408,7 +408,7 @@ def _classify_outcome(
     if industry_acted and not recommends_act:
         return "UNNECESSARY", True
     if not industry_acted and recommends_act:
-        return "SHIRO_MORE_CAUTIOUS", False
+        return "SHIRO_ONLY_ACT", False
     return "AGREE_PASS", False
 
 
@@ -437,7 +437,7 @@ def _build_summary(results: list[ValidatorResult]) -> dict[str, Any]:
     industry_acted = sum(1 for r in results if r.industry_acted)
     unnecessary_maneuvers = sum(1 for r in results if r.unnecessary)
     agree_act = sum(1 for r in results if r.outcome == "AGREE_ACT")
-    shiro_more_cautious = sum(1 for r in results if r.outcome == "SHIRO_MORE_CAUTIOUS")
+    shiro_only_act = sum(1 for r in results if r.outcome == "SHIRO_ONLY_ACT")
     unknown = sum(1 for r in results if r.outcome == "UNKNOWN")
 
     unnecessary_rate = (
@@ -450,7 +450,7 @@ def _build_summary(results: list[ValidatorResult]) -> dict[str, Any]:
         "unnecessary_maneuvers": unnecessary_maneuvers,
         "unnecessary_maneuver_rate": unnecessary_rate,
         "agree_act": agree_act,
-        "shiro_more_cautious": shiro_more_cautious,
+        "shiro_only_act": shiro_only_act,
         "unknown": unknown,
         "policy_version": POLICY_VERSION,
         "run_at": datetime.now(timezone.utc).isoformat(),

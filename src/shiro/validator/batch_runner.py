@@ -17,6 +17,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from shiro.validator.cdm_from_stresslab import compute_pc_bplane, generate_conjunction_from_geometry  # noqa: E402
+from shiro.validator.covariance_model import get_inflation_for_event  # noqa: E402
 
 
 INFLATION_FACTORS = [9, 16, 25]
@@ -71,6 +72,7 @@ def compute_pc_from_cov(
 
 def run_event(params: dict, inflation_factor: int) -> dict:
     try:
+        include_drag = bool(params["altitude_km"] < 600.0)
         cdm = generate_conjunction_from_geometry(
             miss_distance_m=params["miss_distance_m"],
             rel_velocity_mps=params["rel_velocity_mps"],
@@ -81,6 +83,14 @@ def run_event(params: dict, inflation_factor: int) -> dict:
             hbr_m=params["hbr_m"],
             lead_time_hours=params["lead_time_hours"],
             seed=params["seed"],
+            include_drag=include_drag,
+        )
+
+        recommended_k2 = get_inflation_for_event(
+            miss_distance_m=params["miss_distance_m"],
+            altitude_km=params["altitude_km"],
+            lead_time_hours=params["lead_time_hours"],
+            is_active=True,
         )
 
         pc_industry, miss_2d, c_bplane, _ = compute_pc_bplane(
@@ -102,7 +112,7 @@ def run_event(params: dict, inflation_factor: int) -> dict:
         elif industry_acts and not shiro_acts:
             outcome = "UNNECESSARY_MANEUVER"
         elif not industry_acts and shiro_acts:
-            outcome = "SHIRO_MORE_CAUTIOUS"
+            outcome = "SHIRO_ONLY_ACT"
         else:
             outcome = "AGREE_PASS"
 
@@ -118,6 +128,7 @@ def run_event(params: dict, inflation_factor: int) -> dict:
             "shiro_acts": bool(shiro_acts),
             "outcome": outcome,
             "inflation_factor": int(inflation_factor),
+            "recommended_inflation_k2": float(recommended_k2),
             "error": None,
         }
 
@@ -159,7 +170,7 @@ def summarize_sub_batch(results: list[dict], inflation_factor: int) -> dict:
     counts = {
         "AGREE_ACT": 0,
         "UNNECESSARY_MANEUVER": 0,
-        "SHIRO_MORE_CAUTIOUS": 0,
+        "SHIRO_ONLY_ACT": 0,
         "AGREE_PASS": 0,
         "ERROR": 0,
     }
@@ -171,10 +182,10 @@ def summarize_sub_batch(results: list[dict], inflation_factor: int) -> dict:
     umr = unnecessary / industry_acts_total if industry_acts_total > 0 else 0.0
 
     print(f"\nSub-batch summary ({inflation_factor}x)")
-    print(f"  AGREE_ACT:            {counts['AGREE_ACT']}")
-    print(f"  UNNECESSARY_MANEUVER: {counts['UNNECESSARY_MANEUVER']}")
-    print(f"  SHIRO_MORE_CAUTIOUS:  {counts['SHIRO_MORE_CAUTIOUS']}")
-    print(f"  AGREE_PASS:           {counts['AGREE_PASS']}")
+    print(f"AGREE_ACT:        {counts['AGREE_ACT']:3d}  (both act - genuine risk)")
+    print(f"UNNECESSARY_MAN:  {counts['UNNECESSARY_MANEUVER']:3d}  (industry acts, SHIRO passes)")
+    print(f"SHIRO_ONLY_ACT:   {counts['SHIRO_ONLY_ACT']:3d}  (SHIRO acts, industry passes)")
+    print(f"AGREE_PASS:       {counts['AGREE_PASS']:3d}  (both pass - safe event)")
     print(f"  UMR:                  {umr:.1%}")
 
     return {
@@ -192,7 +203,7 @@ def summarize_sub_batch(results: list[dict], inflation_factor: int) -> dict:
 def print_sensitivity_table(summaries: list[dict]) -> None:
     print("\nSENSITIVITY ANALYSIS - Covariance Inflation Factor")
     print("-" * 52)
-    print("Inflation   AGREE_ACT   UNNEC_MAN   SHI_CAUT   AGREE_PASS   UMR")
+    print("Inflation   AGREE_ACT   UNNEC_MAN   SHI_ONLY   AGREE_PASS   UMR")
     for s in summaries:
         counts = s["summary"]
         print(
@@ -200,7 +211,7 @@ def print_sensitivity_table(summaries: list[dict]) -> None:
             f"{'':10}"
             f"{counts['AGREE_ACT']:<11}"
             f"{counts['UNNECESSARY_MANEUVER']:<12}"
-            f"{counts['SHIRO_MORE_CAUTIOUS']:<10}"
+            f"{counts['SHIRO_ONLY_ACT']:<10}"
             f"{counts['AGREE_PASS']:<13}"
             f"{s['unnecessary_maneuver_rate']:.1%}"
         )
@@ -241,8 +252,8 @@ def run_sensitivity(n_events: int = 50, seed: int = 0) -> dict:
 
 
 def plot_summary(summary: dict) -> None:
-    keys = ["AGREE_ACT", "UNNECESSARY_MANEUVER", "SHIRO_MORE_CAUTIOUS", "AGREE_PASS"]
-    labels = ["AGREE_ACT", "UNNECESSARY\\nMANEUVER", "SHIRO_MORE\\nCAUTIOUS", "AGREE_PASS"]
+    keys = ["AGREE_ACT", "UNNECESSARY_MANEUVER", "SHIRO_ONLY_ACT", "AGREE_PASS"]
+    labels = ["AGREE_ACT", "UNNECESSARY\\nMANEUVER", "SHIRO_ONLY\\nACT", "AGREE_PASS"]
     colors = {9: "#60a5fa", 16: "#f59e0b", 25: "#ef4444"}
 
     fig = make_subplots(
@@ -269,7 +280,7 @@ def plot_summary(summary: dict) -> None:
             col=1,
         )
 
-    table_headers = ["Inflation", "AGREE_ACT", "UNNEC_MAN", "SHI_CAUT", "AGREE_PASS", "UMR"]
+    table_headers = ["Inflation", "AGREE_ACT", "UNNEC_MAN", "SHI_ONLY", "AGREE_PASS", "UMR"]
     table_rows = []
     for sub in summary["sub_batch_summaries"]:
         table_rows.append(
@@ -277,7 +288,7 @@ def plot_summary(summary: dict) -> None:
                 f"{sub['inflation_factor']}x",
                 sub["summary"]["AGREE_ACT"],
                 sub["summary"]["UNNECESSARY_MANEUVER"],
-                sub["summary"]["SHIRO_MORE_CAUTIOUS"],
+                sub["summary"]["SHIRO_ONLY_ACT"],
                 sub["summary"]["AGREE_PASS"],
                 f"{sub['unnecessary_maneuver_rate']:.1%}",
             ]

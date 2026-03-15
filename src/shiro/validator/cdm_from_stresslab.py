@@ -8,33 +8,118 @@ import numpy as np
 
 
 MU = 398600.4418
-RE = 6371.0
+RE = 6378.137
 J2 = 1.08263e-3
+J3 = -2.53266e-6
+J4 = -1.61963e-6
+J5 = -2.27732e-7
+J6 = 5.40681e-7
+RHO0 = 1.225e-9
+H_SCALE = 8.5
+CD = 2.2
+AREA_MASS = 0.01
+
+_PROPAGATOR_BANNER_PRINTED = False
 
 
-def propagate_j2(state: np.ndarray, dt: float, steps: int) -> np.ndarray:
-    def dyn(s: np.ndarray) -> np.ndarray:
-        x, y, z = s[0], s[1], s[2]
-        r = np.sqrt(x**2 + y**2 + z**2)
-        r2 = r**2
-        factor = -MU / r**3
-        j2_factor = 1.5 * J2 * MU * RE**2 / r**5
-        ax = factor * x + j2_factor * x * (1.0 - 5.0 * z**2 / r2)
-        ay = factor * y + j2_factor * y * (1.0 - 5.0 * z**2 / r2)
-        az = factor * z + j2_factor * z * (3.0 - 5.0 * z**2 / r2)
-        return np.array([s[3], s[4], s[5], ax, ay, az], dtype=float)
+def atmospheric_density(altitude_km: float) -> float:
+    alt_bands = [
+        (0.0, 25.0, 1.225e-9, 7.249),
+        (25.0, 30.0, 3.899e-11, 6.349),
+        (30.0, 40.0, 1.774e-11, 6.682),
+        (40.0, 50.0, 3.972e-12, 7.554),
+        (50.0, 60.0, 1.057e-12, 8.382),
+        (60.0, 70.0, 3.206e-13, 7.714),
+        (70.0, 80.0, 8.770e-14, 6.549),
+        (80.0, 90.0, 1.905e-14, 5.799),
+        (90.0, 100.0, 3.396e-15, 5.382),
+        (100.0, 110.0, 5.297e-16, 5.877),
+        (110.0, 120.0, 9.661e-17, 7.263),
+        (120.0, 130.0, 2.438e-17, 9.473),
+        (130.0, 140.0, 8.484e-18, 12.636),
+        (140.0, 150.0, 3.845e-18, 16.149),
+        (150.0, 180.0, 2.070e-18, 22.523),
+        (180.0, 200.0, 5.464e-19, 29.740),
+        (200.0, 250.0, 2.789e-19, 37.105),
+        (250.0, 300.0, 7.248e-20, 45.546),
+        (300.0, 350.0, 2.418e-20, 53.628),
+        (350.0, 400.0, 9.518e-21, 53.298),
+        (400.0, 450.0, 3.725e-21, 58.515),
+        (450.0, 500.0, 1.585e-21, 60.828),
+        (500.0, 600.0, 6.967e-22, 63.822),
+        (600.0, 700.0, 1.454e-22, 71.835),
+        (700.0, 800.0, 3.614e-23, 88.667),
+        (800.0, 900.0, 1.170e-23, 124.64),
+        (900.0, 1000.0, 5.245e-24, 181.05),
+        (1000.0, 1e9, 3.019e-24, 268.0),
+    ]
+    for h_min, h_max, rho_ref, h_scale in alt_bands:
+        if altitude_km <= h_max:
+            return float(rho_ref * np.exp(-(altitude_km - h_min) / h_scale))
+    return float(3.019e-24 * np.exp(-(altitude_km - 1000.0) / 268.0))
 
-    def rk4_step(s: np.ndarray, h: float) -> np.ndarray:
-        k1 = dyn(s)
-        k2 = dyn(s + 0.5 * h * k1)
-        k3 = dyn(s + 0.5 * h * k2)
-        k4 = dyn(s + h * k3)
-        return s + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
+def accel_j2_drag(
+    state: np.ndarray,
+    area_mass_ratio: float = AREA_MASS,
+    cd: float = CD,
+    include_drag: bool = True,
+) -> np.ndarray:
+    x, y, z, vx, vy, vz = state
+    r = np.sqrt(x**2 + y**2 + z**2)
+    r2 = r**2
+    r3 = r**3
+    r5 = r**5
+    r7 = r**7
+
+    ax = -MU * x / r3
+    ay = -MU * y / r3
+    az = -MU * z / r3
+
+    z2_r2 = z**2 / r2
+    j2_factor = 1.5 * J2 * MU * RE**2 / r5
+    ax += j2_factor * x * (1.0 - 5.0 * z2_r2)
+    ay += j2_factor * y * (1.0 - 5.0 * z2_r2)
+    az += j2_factor * z * (3.0 - 5.0 * z2_r2)
+
+    j3_factor = 2.5 * J3 * MU * RE**3 / r7
+    ax += j3_factor * x * (3.0 * z - 7.0 * z**3 / r2)
+    ay += j3_factor * y * (3.0 * z - 7.0 * z**3 / r2)
+    az += j3_factor * (6.0 * z**2 - 7.0 * z**4 / r2 - 3.0 * r2 / 5.0)
+
+    if include_drag:
+        altitude_km = r - RE
+        if altitude_km < 1000.0:
+            rho = atmospheric_density(altitude_km)
+            v_mag = np.sqrt(vx**2 + vy**2 + vz**2)
+            if v_mag > 0:
+                am_km = area_mass_ratio * 1e-6
+                a_drag_mag = -0.5 * cd * am_km * rho * v_mag**2
+                ax += a_drag_mag * vx / v_mag
+                ay += a_drag_mag * vy / v_mag
+                az += a_drag_mag * vz / v_mag
+
+    return np.array([vx, vy, vz, ax, ay, az], dtype=float)
+
+
+def propagate_j2_drag(
+    state0: np.ndarray,
+    dt: float,
+    steps: int,
+    area_mass_ratio: float = AREA_MASS,
+    cd: float = CD,
+    include_drag: bool = True,
+) -> np.ndarray:
     traj = np.zeros((steps + 1, 6), dtype=float)
-    traj[0] = state.astype(float)
+    traj[0] = state0.copy()
+    state = state0.copy()
     for i in range(steps):
-        traj[i + 1] = rk4_step(traj[i], dt)
+        k1 = accel_j2_drag(state, area_mass_ratio, cd, include_drag)
+        k2 = accel_j2_drag(state + 0.5 * dt * k1, area_mass_ratio, cd, include_drag)
+        k3 = accel_j2_drag(state + 0.5 * dt * k2, area_mass_ratio, cd, include_drag)
+        k4 = accel_j2_drag(state + dt * k3, area_mass_ratio, cd, include_drag)
+        state = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        traj[i + 1] = state
     return traj
 
 
@@ -89,6 +174,78 @@ def compute_pc_bplane(
     return pc, miss_2d, c_bplane, samples
 
 
+def build_realistic_miss_vector(
+    r1_tca: np.ndarray,
+    v1_tca: np.ndarray,
+    v2_tca: np.ndarray,
+    miss_distance_km: float,
+    along_track_fraction: float = 0.7,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    if rng is None:
+        rng = np.random.default_rng(42)
+    _ = rng
+
+    rel_vel = v2_tca - v1_tca
+    rel_vel_norm = rel_vel / np.linalg.norm(rel_vel)
+
+    r_norm = r1_tca / np.linalg.norm(r1_tca)
+    along_track = np.cross(r_norm, np.cross(r_norm, rel_vel_norm))
+    if np.linalg.norm(along_track) > 1e-10:
+        along_track = along_track / np.linalg.norm(along_track)
+    else:
+        along_track = np.cross(rel_vel_norm, np.array([0.0, 0.0, 1.0], dtype=float))
+        along_track = along_track / np.linalg.norm(along_track)
+
+    cross_track = np.cross(rel_vel_norm, along_track)
+    if np.linalg.norm(cross_track) > 1e-10:
+        cross_track = cross_track / np.linalg.norm(cross_track)
+    else:
+        cross_track = np.cross(rel_vel_norm, np.array([0.0, 1.0, 0.0], dtype=float))
+        cross_track = cross_track / np.linalg.norm(cross_track)
+
+    cross_track_fraction = 1.0 - along_track_fraction
+    miss_vec = along_track_fraction * along_track + cross_track_fraction * cross_track
+    miss_vec = miss_vec / np.linalg.norm(miss_vec)
+    return miss_vec * miss_distance_km
+
+
+def build_realistic_covariance(
+    sigma_combined_km: float,
+    lead_time_hours: float,
+    altitude_km: float,
+) -> tuple[np.ndarray, float, float, float]:
+    lead_time_days = lead_time_hours / 24.0
+    at_scale = min(10.0 + 5.0 * lead_time_days, 40.0)
+
+    if altitude_km < 400.0:
+        alt_factor = 1.5
+    elif altitude_km < 600.0:
+        alt_factor = 1.0
+    else:
+        alt_factor = 0.7
+
+    sigma_radial = sigma_combined_km * 0.2 * alt_factor
+    sigma_intrack = sigma_combined_km * at_scale * 0.1 * alt_factor
+    sigma_crosstrack = sigma_combined_km * 0.25 * alt_factor
+
+    sigma_radial = max(sigma_radial, 50.0 / 1000.0)
+    sigma_intrack = max(sigma_intrack, 200.0 / 1000.0)
+    sigma_crosstrack = max(sigma_crosstrack, 50.0 / 1000.0)
+
+    c = np.diag(
+        [
+            (sigma_radial / 2.0) ** 2,
+            (sigma_intrack / 2.0) ** 2,
+            (sigma_crosstrack / 2.0) ** 2,
+            1e-8,
+            1e-8,
+            1e-8,
+        ]
+    )
+    return c, sigma_radial, sigma_intrack, sigma_crosstrack
+
+
 def generate_conjunction_from_geometry(
     miss_distance_m: float = 150.0,
     rel_velocity_mps: float = 11000.0,
@@ -99,8 +256,17 @@ def generate_conjunction_from_geometry(
     hbr_m: float = 20.0,
     lead_time_hours: float = 4.0,
     seed: int = 42,
+    include_drag: bool | None = None,
 ) -> dict:
-    _ = seed
+    global _PROPAGATOR_BANNER_PRINTED
+
+    if include_drag is None:
+        include_drag = altitude_km < 600.0
+
+    if not _PROPAGATOR_BANNER_PRINTED:
+        print("Propagator upgraded: J2 + J3 + drag active")
+        _PROPAGATOR_BANNER_PRINTED = True
+
     r_mag = RE + altitude_km
     v_circ = np.sqrt(MU / r_mag)
 
@@ -119,16 +285,15 @@ def generate_conjunction_from_geometry(
         dtype=float,
     )
 
-    rel_vel = v2_tca - v1_tca
-    rel_vel_norm = rel_vel / np.linalg.norm(rel_vel)
-    z_hat = np.array([0.0, 0.0, 1.0], dtype=float)
-    miss_dir = np.cross(rel_vel_norm, z_hat)
-    if np.linalg.norm(miss_dir) < 1e-10:
-        miss_dir = np.cross(rel_vel_norm, np.array([0.0, 1.0, 0.0], dtype=float))
-    miss_dir = miss_dir / np.linalg.norm(miss_dir)
-
     miss_km = miss_distance_m / 1000.0
-    r2_tca = r1_tca + miss_dir * miss_km
+    miss_dir = build_realistic_miss_vector(
+        r1_tca,
+        v1_tca,
+        v2_tca,
+        miss_km,
+        along_track_fraction=0.7,
+    )
+    r2_tca = r1_tca + miss_dir
 
     s1_tca = np.concatenate([r1_tca, v1_tca])
     s2_tca = np.concatenate([r2_tca, v2_tca])
@@ -137,16 +302,16 @@ def generate_conjunction_from_geometry(
 
     lead_time_s = lead_time_hours * 3600.0
     steps = int(lead_time_s / 30.0)
-    state1_initial = propagate_j2(s1_tca, dt=-30.0, steps=steps)[-1]
-    state2_initial = propagate_j2(s2_tca, dt=-30.0, steps=steps)[-1]
+    state1_initial = propagate_j2_drag(s1_tca, dt=-30.0, steps=steps, include_drag=include_drag)[-1]
+    state2_initial = propagate_j2_drag(s2_tca, dt=-30.0, steps=steps, include_drag=include_drag)[-1]
 
     t = 2.0 * np.pi * np.sqrt(r_mag**3 / MU)
     steps_full = int(t / 30.0) + 1
 
-    traj1_vis = propagate_j2(state1_initial, dt=30.0, steps=steps_full)
-    traj2_vis = propagate_j2(state2_initial, dt=30.0, steps=steps_full)
-    traj1 = propagate_j2(state1_initial, dt=30.0, steps=steps)
-    traj2 = propagate_j2(state2_initial, dt=30.0, steps=steps)
+    traj1_vis = propagate_j2_drag(state1_initial, dt=30.0, steps=steps_full, include_drag=include_drag)
+    traj2_vis = propagate_j2_drag(state2_initial, dt=30.0, steps=steps_full, include_drag=include_drag)
+    traj1 = propagate_j2_drag(state1_initial, dt=30.0, steps=steps, include_drag=include_drag)
+    traj2 = propagate_j2_drag(state2_initial, dt=30.0, steps=steps, include_drag=include_drag)
 
     seps = np.linalg.norm(traj1[:, :3] - traj2[:, :3], axis=1)
     tca_idx = int(np.argmin(seps))
@@ -154,18 +319,10 @@ def generate_conjunction_from_geometry(
 
     hbr_km = hbr_m / 1000.0
     sigma_combined_km = hbr_km / np.sqrt(2.0 * target_pc)
-    sigma_radial = sigma_combined_km * 0.3
-    sigma_intrack = sigma_combined_km * 0.9
-    sigma_crosstrack = sigma_combined_km * 0.3
-    c = np.diag(
-        [
-            (sigma_radial / 2.0) ** 2,
-            (sigma_intrack / 2.0) ** 2,
-            (sigma_crosstrack / 2.0) ** 2,
-            1e-8,
-            1e-8,
-            1e-8,
-        ]
+    c, sigma_radial, sigma_intrack, sigma_crosstrack = build_realistic_covariance(
+        sigma_combined_km,
+        lead_time_hours,
+        altitude_km,
     )
 
     h1 = np.cross(state1_initial[:3], state1_initial[3:])
@@ -178,6 +335,7 @@ def generate_conjunction_from_geometry(
     print(f"Actual miss distance: {actual_miss_km * 1000.0:.1f} m          [must be 140-160m]")
     print(f"Angle between planes: {plane_angle:.1f} deg        [must be > 60]")
     print(f"sigma_combined: {sigma_combined_km * 1000.0:.1f} m")
+    print(f"Covariance shape - R:{sigma_radial * 1000.0:.0f}m T:{sigma_intrack * 1000.0:.0f}m N:{sigma_crosstrack * 1000.0:.0f}m")
     print(f"Target Pc: {target_pc:.1e}")
 
     return {
